@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interferon Therapy Trajectory Group Calculator</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #2c3e50;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .input-section {
+            margin-bottom: 30px;
+        }
+        .data-row {
+            display: flex;
+            margin-bottom: 15px;
+            align-items: center;
+        }
+        .data-row input {
+            margin: 0 10px;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            width: 100px;
+        }
+        .unit-label {
+            margin-left: 5px;
+            color: #666;
+        }
+        button {
+            background-color: #3498db;
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 10px 5px;
+        }
+        button:hover {
+            background-color: #2980b9;
+        }
+        .result {
+            margin-top: 30px;
+            padding: 20px;
+            background-color: #ecf0f1;
+            border-radius: 5px;
+            display: none;
+        }
+        .probability-bar {
+            height: 20px;
+            background-color: #bdc3c7;
+            border-radius: 10px;
+            margin: 10px 0;
+            overflow: hidden;
+        }
+        .probability-fill {
+            height: 100%;
+            background-color: #2ecc71;
+            transition: width 0.5s ease;
+        }
+        .group-name {
+            font-weight: bold;
+            color: #2c3e50;
+        }
+        .high-probability {
+            color: #e74c3c;
+            font-weight: bold;
+            font-size: 1.2em;
+        }
+        .instructions {
+            background-color: #fff8e1;
+            padding: 15px;
+            border-left: 4px solid #ffc107;
+            margin-bottom: 20px;
+        }
+        .clinical-advice {
+            margin-top: 15px;
+            padding: 15px;
+            background-color: #e3f2fd;
+            border-radius: 5px;
+            border-left: 5px solid #2196f3;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Interferon Therapy Trajectory Group Calculator</h1>
+        
+        <div class="instructions">
+            <p><strong>Instructions:</strong> Please enter patient measurement data at different time points. Time unit: Weeks; HBsAg unit: IU/mL (Please enter raw data without log10 transformation).</p>
+        </div>
+
+        <div class="input-section">
+            <h3>Patient Follow-up Data Input</h3>
+            <div id="data-inputs">
+                <div class="data-row">
+                    <span>Time Point 1:</span>
+                    <input type="number" id="time1" placeholder="Time" step="0.1">
+                    <span class="unit-label">Weeks</span>
+                    <input type="number" id="value1" placeholder="Value" step="0.001">
+                    <span class="unit-label">IU/mL</span>
+                </div>
+            </div>
+            <button onclick="addDataRow()">+ Add Time Point</button>
+            <button onclick="removeDataRow()">- Remove Time Point</button>
+        </div>
+
+        <div>
+            <button onclick="calculateProbability()">Calculate Group Probability</button>
+            <button onclick="resetForm()">Reset</button>
+        </div>
+
+        <div id="result" class="result">
+            <h3>Group Assignment Report</h3>
+            <div id="probability-display"></div>
+            <div id="final-conclusion"></div>
+        </div>
+    </div>
+
+    <script>
+        // Model parameters - from your research
+        const modelParams = {
+            // Trajectory equation coefficients
+            trajectoryCoeffs: {
+                group1: [2.023, -1.243e-1, 1.59e-3, -1.0e-5],
+                group2: [2.999, -4.587e-2, 2.9e-4],
+                group3: [3.755, -8.41e-3]
+            },
+            // Prior probabilities - from Supplementary Table 2
+            priorProbabilities: [0.3756, 0.3073, 0.3171],
+            // Residual standard deviation
+            sigma: 0.80424,
+            // Truncation points
+            lowerBound: -1.3,
+            upperBound: 5.25,
+            // Group names
+            groupNames: ["Rapid Decline Group", "Moderate Response Group", "Slow Response Group"]
+        };
+
+        // Clinical advice
+        const clinicalAdvice = {
+            0: "The patient belongs to the Rapid Decline Group, showing good response to interferon therapy. It is recommended to maintain the current treatment plan and regularly monitor HBsAg levels.",
+            1: "The patient belongs to the Moderate Response Group, showing intermediate response to interferon therapy. It is recommended to increase follow-up frequency, monitor disease progression, and evaluate whether treatment strategy adjustment is needed.", 
+            2: "The patient belongs to the Slow Response Group, showing slow response to interferon therapy. It is recommended to evaluate the current treatment plan and consider adjusting medication strategy or combining with other treatment methods."
+        };
+
+        // Dynamically add data row
+        function addDataRow() {
+            const container = document.getElementById('data-inputs');
+            const rowCount = container.children.length + 1;
+            
+            const newRow = document.createElement('div');
+            newRow.className = 'data-row';
+            newRow.innerHTML = `
+                <span>Time Point ${rowCount}:</span>
+                <input type="number" id="time${rowCount}" placeholder="Time" step="0.1">
+                <span class="unit-label">Weeks</span>
+                <input type="number" id="value${rowCount}" placeholder="Value" step="0.001">
+                <span class="unit-label">IU/mL</span>
+            `;
+            container.appendChild(newRow);
+        }
+
+        // Remove data row
+        function removeDataRow() {
+            const container = document.getElementById('data-inputs');
+            if (container.children.length > 1) {
+                container.removeChild(container.lastChild);
+            }
+        }
+
+        // Reset form
+        function resetForm() {
+            document.getElementById('data-inputs').innerHTML = `
+                <div class="data-row">
+                    <span>Time Point 1:</span>
+                    <input type="number" id="time1" placeholder="Time" step="0.1">
+                    <span class="unit-label">Weeks</span>
+                    <input type="number" id="value1" placeholder="Value" step="0.001">
+                    <span class="unit-label">IU/mL</span>
+                </div>
+            `;
+            document.getElementById('result').style.display = 'none';
+        }
+
+        // Calculate trajectory prediction
+        function calculateTrajectory(w, coefficients) {
+            let result = 0;
+            for (let i = 0; i < coefficients.length; i++) {
+                result += coefficients[i] * Math.pow(w, i);
+            }
+            return result;
+        }
+
+        // Standard normal cumulative distribution function (CDF) approximation
+        function standardNormalCDF(x) {
+            // Use approximation formula
+            const t = 1 / (1 + 0.2316419 * Math.abs(x));
+            const d = 0.3989423 * Math.exp(-x * x / 2);
+            let probability = d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274))));
+            if (x > 0) {
+                probability = 1 - probability;
+            }
+            return probability;
+        }
+
+        // Standard normal probability density function (PDF)
+        function standardNormalPDF(x) {
+            return (1 / Math.sqrt(2 * Math.PI)) * Math.exp(-0.5 * x * x);
+        }
+
+        // Calculate likelihood value L_t,j
+        function calculateLikelihood(y, yPred, sigma, lowerBound, upperBound) {
+            if (y <= lowerBound) {
+                return standardNormalCDF((lowerBound - yPred) / sigma);
+            } else if (y >= upperBound) {
+                return 1 - standardNormalCDF((upperBound - yPred) / sigma);
+            } else {
+                return (1 / sigma) * standardNormalPDF((y - yPred) / sigma);
+            }
+        }
+
+        // Main calculation function
+        function calculateProbability() {
+            // Collect input data
+            const dataPoints = [];
+            const inputs = document.getElementById('data-inputs').children;
+            
+            for (let i = 0; i < inputs.length; i++) {
+                const time = parseFloat(document.getElementById(`time${i+1}`).value);
+                const value = parseFloat(document.getElementById(`value${i+1}`).value);
+                
+                if (isNaN(time) || isNaN(value)) {
+                    alert(`Please complete data for Time Point ${i+1}`);
+                    return;
+                }
+                
+                // Convert raw HBsAg values to log10 values
+                const logValue = Math.log10(value);
+                dataPoints.push({ w: time, y: logValue, originalValue: value });
+            }
+
+            if (dataPoints.length === 0) {
+                alert("Please enter data for at least one time point");
+                return;
+            }
+
+            // Calculate unnormalized probabilities for each trajectory group
+            const numerators = [0, 0, 0];
+            const groups = ['group1', 'group2', 'group3'];
+            
+            groups.forEach((group, groupIndex) => {
+                let likelihoodProduct = 1;
+                
+                // Calculate likelihood for each time point and multiply
+                dataPoints.forEach(point => {
+                    const yPred = calculateTrajectory(point.w, modelParams.trajectoryCoeffs[group]);
+                    const likelihood = calculateLikelihood(
+                        point.y, yPred, 
+                        modelParams.sigma, 
+                        modelParams.lowerBound, 
+                        modelParams.upperBound
+                    );
+                    likelihoodProduct *= likelihood;
+                });
+                
+                // Multiply by prior probability
+                numerators[groupIndex] = modelParams.priorProbabilities[groupIndex] * likelihoodProduct;
+            });
+
+            // Calculate denominator (sum of unnormalized probabilities for all groups)
+            const denominator = numerators.reduce((sum, num) => sum + num, 0);
+
+            // Calculate posterior probabilities
+            const posteriorProbabilities = numerators.map(num => num / denominator);
+
+            // Display results
+            displayResults(posteriorProbabilities, dataPoints);
+        }
+
+        // Display calculation results
+        function displayResults(probabilities, dataPoints) {
+            const resultDiv = document.getElementById('result');
+            const probabilityDisplay = document.getElementById('probability-display');
+            const conclusionDiv = document.getElementById('final-conclusion');
+            
+            // Find the group with highest probability
+            let maxProb = 0;
+            let maxIndex = 0;
+            probabilities.forEach((prob, index) => {
+                if (prob > maxProb) {
+                    maxProb = prob;
+                    maxIndex = index;
+                }
+            });
+
+            // Generate probability display HTML
+            let html = '';
+            probabilities.forEach((prob, index) => {
+                const percentage = (prob * 100).toFixed(1);
+                html += `
+                    <div>
+                        <span class="group-name">${modelParams.groupNames[index]}:</span> ${percentage}%
+                        <div class="probability-bar">
+                            <div class="probability-fill" style="width: ${percentage}%"></div>
+                        </div>
+                    </div>
+                `;
+            });
+            probabilityDisplay.innerHTML = html;
+
+            // Generate final conclusion
+            const percentage = (maxProb * 100).toFixed(1);
+            conclusionDiv.innerHTML = `
+                <p class="high-probability">
+                    This patient has a <strong>${percentage}%</strong> probability of belonging to the <strong>"${modelParams.groupNames[maxIndex]}"</strong>
+                </p>
+                <div class="clinical-advice">
+                    <h4 style="margin-top: 0; color: #1976d2;">Clinical Recommendations</h4>
+                    <p style="margin-bottom: 0; font-size: 1.1em;">${clinicalAdvice[maxIndex]}</p>
+                </div>
+                <div style="margin-top: 15px; padding: 10px; background-color: #f3e5f5; border-radius: 5px;">
+                    <p><strong>Data Summary:</strong> ${dataPoints.length} time points of HBsAg data were entered.</p>
+                    <p><strong>Note:</strong> The calculator automatically converted the input raw HBsAg values (IU/mL) to log10 values for model calculation.</p>
+                </div>
+            `;
+
+            // Display result section
+            resultDiv.style.display = 'block';
+        }
+
+        // Add initial row when page loads
+        window.onload = function() {
+            addDataRow();
+        };
+    </script>
+</body>
+</html>
